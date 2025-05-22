@@ -2,12 +2,13 @@ import streamlit as st
 import psycopg2
 import pymongo
 import mysql.connector
-import pymssql
+import pyodbc
 import pandas as pd
 import google.generativeai as genai
 import json
 from bson import ObjectId
 import traceback
+import pymssql
 
 # Configure Gemini API Key
 genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
@@ -19,34 +20,14 @@ db_type = st.selectbox("Select Database Type", ["PostgreSQL", "MongoDB", "MySQL"
 
 # Step 2: Enter Connection Details
 st.subheader("Enter Database Connection Details")
-
-host = st.text_input("Host", "localhost")
-
-# Default ports per DB type if empty
-default_ports = {
-    "PostgreSQL": "5432",
-    "MongoDB": "27017",
-    "MySQL": "3306",
-    "MSSQL": "1433"
-}
-port = st.text_input("Port", default_ports.get(db_type, ""))
-
+host = st.text_input("Host", "")
+port = st.text_input("Port", "")
 database = st.text_input("Database Name", "")
 user = st.text_input("Username", "")
 password = st.text_input("Password", type="password")
 
-# For MongoDB, also ask collection name explicitly (optional)
-collection_name = None
-if db_type == "MongoDB":
-    collection_name = st.text_input("Collection Name (required for MongoDB queries)")
 
-# Helper Classes & Functions
-class JSONEncoder(json.JSONEncoder):
-    def default(self, obj):
-        if isinstance(obj, ObjectId):
-            return str(obj)
-        return super().default(obj)
-
+# Helper Functions
 def generate_sql(nl_query, db_type):
     try:
         model = genai.GenerativeModel(model_name="gemini-2.0-flash")
@@ -66,6 +47,12 @@ def generate_sql(nl_query, db_type):
     except Exception as e:
         return f"Error generating SQL: {str(e)}"
 
+class JSONEncoder(json.JSONEncoder):
+    def default(self, obj):
+        if isinstance(obj, ObjectId):
+            return str(obj)
+        return super().default(obj)
+
 def execute_mongo_query(collection_name, db_config):
     try:
         client = pymongo.MongoClient(db_config["host"], int(db_config["port"]))
@@ -82,14 +69,20 @@ def execute_sql_query(sql_query, db_type, db_config):
             conn = psycopg2.connect(**db_config)
         elif db_type == "MySQL":
             conn = mysql.connector.connect(**db_config)
+        # elif db_type == "MSSQL":
+        #     conn = pyodbc.connect(
+        #         f"DRIVER={{SQL Server}};SERVER={db_config['host']};DATABASE={db_config['database']};"
+        #         f"UID={db_config['user']};PWD={db_config['password']}"
+        #     )
         elif db_type == "MSSQL":
             conn = pymssql.connect(
                 server=db_config["host"],
                 user=db_config["user"],
                 password=db_config["password"],
                 database=db_config["database"],
-                port=int(db_config.get("port", 1433))
+                port=int(db_config.get("port", 1433))  # Default SQL Server port is 1433
             )
+
         else:
             return {"error": "Invalid database type"}
 
@@ -97,7 +90,6 @@ def execute_sql_query(sql_query, db_type, db_config):
         cursor.execute(sql_query)
         result = cursor.fetchall()
         column_names = [desc[0] for desc in cursor.description]
-
         cursor.close()
         conn.close()
 
@@ -107,25 +99,21 @@ def execute_sql_query(sql_query, db_type, db_config):
 
 # Step 3: Connect to Database
 if st.button("Connect"):
-    # Use defaults for port if empty
-    use_port = port if port else default_ports.get(db_type)
     db_config = {
         "host": host,
-        "port": int(use_port) if use_port else None,
+        "port": port,
         "database": database,
         "user": user,
         "password": password,
     }
-
-    # Remove port from dict if None (some drivers don't want it)
-    if db_config["port"] is None:
-        db_config.pop("port")
-
     try:
         if db_type == "PostgreSQL":
             psycopg2.connect(**db_config).close()
         elif db_type == "MySQL":
             mysql.connector.connect(**db_config).close()
+        # elif db_type == "MSSQL":
+        #     conn_str = f"DRIVER={{SQL Server}};SERVER={host};DATABASE={database};UID={user};PWD={password}"
+        #     pyodbc.connect(conn_str).close()
         elif db_type == "MSSQL":
             conn = pymssql.connect(
                 server=db_config["host"],
@@ -134,9 +122,9 @@ if st.button("Connect"):
                 database=db_config["database"],
                 port=int(db_config.get("port", 1433))
             )
-            conn.close()
+
         elif db_type == "MongoDB":
-            client = pymongo.MongoClient(host, int(use_port))
+            client = pymongo.MongoClient(host, int(port))
             client[database].command("ping")
         else:
             st.error("Unsupported database type.")
@@ -145,8 +133,6 @@ if st.button("Connect"):
         st.success(f"Connected to {db_type} successfully!")
         st.session_state["db_type"] = db_type
         st.session_state["db_config"] = db_config
-        if db_type == "MongoDB":
-            st.session_state["collection_name"] = collection_name
 
     except Exception as e:
         st.error(f"Connection failed: {str(e)}")
@@ -162,12 +148,8 @@ if "db_type" in st.session_state:
             db_config = st.session_state["db_config"]
 
             if db_type == "MongoDB":
-                coll_name = st.session_state.get("collection_name")
-                if not coll_name:
-                    st.error("Please enter a collection name to query MongoDB.")
-                    st.stop()
-
-                result = execute_mongo_query(coll_name, db_config)
+                collection_name = user_query.split()[-1]
+                result = execute_mongo_query(collection_name, db_config)
                 if "error" in result:
                     st.error(result["error"])
                 else:
