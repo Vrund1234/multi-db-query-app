@@ -8,6 +8,7 @@ import google.generativeai as genai
 import json
 from bson import ObjectId
 import traceback
+import pymssql
 
 # Configure Gemini API Key
 genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
@@ -68,11 +69,20 @@ def execute_sql_query(sql_query, db_type, db_config):
             conn = psycopg2.connect(**db_config)
         elif db_type == "MySQL":
             conn = mysql.connector.connect(**db_config)
+        # elif db_type == "MSSQL":
+        #     conn = pyodbc.connect(
+        #         f"DRIVER={{SQL Server}};SERVER={db_config['host']};DATABASE={db_config['database']};"
+        #         f"UID={db_config['user']};PWD={db_config['password']}"
+        #     )
         elif db_type == "MSSQL":
-            conn = pyodbc.connect(
-                f"DRIVER={{SQL Server}};SERVER={db_config['host']};DATABASE={db_config['database']};"
-                f"UID={db_config['user']};PWD={db_config['password']}"
+            conn = pymssql.connect(
+                server=db_config["host"],
+                user=db_config["user"],
+                password=db_config["password"],
+                database=db_config["database"],
+                port=int(db_config.get("port", 1433))  # Default SQL Server port is 1433
             )
+
         else:
             return {"error": "Invalid database type"}
 
@@ -101,9 +111,18 @@ if st.button("Connect"):
             psycopg2.connect(**db_config).close()
         elif db_type == "MySQL":
             mysql.connector.connect(**db_config).close()
+        # elif db_type == "MSSQL":
+        #     conn_str = f"DRIVER={{SQL Server}};SERVER={host};DATABASE={database};UID={user};PWD={password}"
+        #     pyodbc.connect(conn_str).close()
         elif db_type == "MSSQL":
-            conn_str = f"DRIVER={{SQL Server}};SERVER={host};DATABASE={database};UID={user};PWD={password}"
-            pyodbc.connect(conn_str).close()
+            conn = pymssql.connect(
+                server=db_config["host"],
+                user=db_config["user"],
+                password=db_config["password"],
+                database=db_config["database"],
+                port=int(db_config.get("port", 1433))
+            )
+
         elif db_type == "MongoDB":
             client = pymongo.MongoClient(host, int(port))
             client[database].command("ping")
