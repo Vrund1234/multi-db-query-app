@@ -1,0 +1,7 @@
+streamlit
+psycopg2-binary
+pymongo
+mysql-connector-python
+pyodbc
+pandas
+google-generativeai
