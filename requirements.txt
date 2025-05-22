@@ -1,9 +1,9 @@
 streamlit
 psycopg2-binary
-pymongo
 mysql-connector-python
 pyodbc
 pandas
 google-generativeai
 pymssql
 bson
+pymongo==3.12.3
